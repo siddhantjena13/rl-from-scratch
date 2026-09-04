@@ -57,44 +57,47 @@ def main():
     rng = np.random.default_rng(42)
     weights, bias = initialize_policy(input_dim=4, output_dim=2, rng=rng)
 
-    obs, info = env.reset(seed=42)
-    done = False
-    total_reward = 0
-
-    episode_obs = []
-    episode_actions = []
-    episode_rewards = []
-
-    while not done:
-        probs = policy_forward(obs, weights, bias)
-        action = rng.choice(2, p=probs)
-
-        episode_obs.append(obs)
-        episode_actions.append(action)
-
-        obs, reward, terminated, truncated, info = env.step(action)
-
-        episode_rewards.append(reward)
-
-        total_reward += reward
-        done = terminated or truncated
-    
+    num_episodes = 1000
     gamma = 0.99
-    returns = compute_discounted_returns(episode_rewards, gamma)
-    returns = normalize(returns)
-
     learning_rate = 0.01
-    weights, bias = update_policy(
-        episode_obs,
-        episode_actions,
-        returns,
-        weights,
-        bias,
-        learning_rate,
-    )
 
-    print("Updated weights:", weights)
-    print("Updated bias:", bias)
+    for episode in range(num_episodes):
+        obs, info = env.reset()
+        done = False
+        total_reward = 0
+
+        episode_obs = []
+        episode_actions = []
+        episode_rewards = []
+
+        while not done:
+            probs = policy_forward(obs, weights, bias)
+            action = rng.choice(2, p=probs)
+
+            episode_obs.append(obs)
+            episode_actions.append(action)
+
+            obs, reward, terminated, truncated, info = env.step(action)
+
+            episode_rewards.append(reward)
+            total_reward += reward
+            done = terminated or truncated
+
+        returns = compute_discounted_returns(episode_rewards, gamma)
+        returns = normalize(returns)
+
+        weights, bias = update_policy(
+            episode_obs,
+            episode_actions,
+            returns,
+            weights,
+            bias,
+            learning_rate,
+        )
+
+        if (episode + 1) % 50 == 0:
+            print(f"Episode {episode + 1}: reward = {total_reward}")
+
     env.close()
 
 
