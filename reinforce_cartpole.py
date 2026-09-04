@@ -18,6 +18,17 @@ def policy_forward(obs, weights, bias):
     probs = softmax(logits)
     return probs
 
+def compute_discounted_returns(rewards, gamma):
+    returns = []
+    running_return = 0.0
+
+    for reward in reversed(rewards):
+        running_return = reward + gamma * running_return
+        returns.append(running_return)
+
+    returns.reverse()
+    return np.array(returns)
+
 def main():
     env = gym.make("CartPole-v1")
 
@@ -46,12 +57,20 @@ def main():
         total_reward += reward
         done = terminated or truncated
     
+    gamma = 0.99
+    returns = compute_discounted_returns(episode_rewards, gamma)
+
     print("Episode length:", len(episode_rewards))
     print("First observation:", episode_obs[0])
     print("First action:", episode_actions[0])
     print("First reward:", episode_rewards[0])
 
     print("Random policy reward:", total_reward)
+    
+    print("Returns:", returns)
+    print("First return:", returns[0])
+    print("Last return:", returns[-1])
+    
     env.close()
 
 
