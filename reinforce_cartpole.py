@@ -51,6 +51,27 @@ def update_policy(episode_observations, episode_actions, returns, weights, bias,
 
     return weights, bias
 
+def compute_policy_gradients(episode_observations, episode_actions, returns, weights, bias):
+    grad_weights = np.zeros_like(weights)
+    grad_bias = np.zeros_like(bias)
+
+    for obs, action, return_t in zip(episode_observations, episode_actions, returns):
+        probs = policy_forward(obs, weights, bias)
+
+        dlogits = probs.copy()
+        dlogits[action] -= 1
+        dlogits *= return_t
+
+        grad_weights += np.outer(obs, dlogits)
+        grad_bias += dlogits
+
+    return grad_weights, grad_bias
+
+def update_policy(weights, bias, grad_weights, grad_bias, learning_rate):
+    weights -= learning_rate * grad_weights
+    bias -= learning_rate * grad_bias
+    return weights, bias
+
 def run_episode(env, weights, bias, rng):
     obs, info = env.reset()
     done = False
@@ -81,41 +102,63 @@ def main():
     rng = np.random.default_rng(42)
     weights, bias = initialize_policy(input_dim=4, output_dim=2, rng=rng)
 
-    num_episodes = 1000
+    num_batches = 100
+    batch_size = 10
     gamma = 0.99
     learning_rate = 0.005
 
     episode_rewards_history = []
 
-    for episode in range(num_episodes):
-        episode_observations, episode_actions, episode_rewards, total_reward = run_episode(
-            env,
-            weights,
-            bias,
-            rng,
-        )
+    for batch in range(num_batches):
+        batch_grad_weights = np.zeros_like(weights)
+        batch_grad_bias = np.zeros_like(bias)
 
-        returns = compute_discounted_returns(episode_rewards, gamma)
-        returns = normalize(returns)
+        batch_rewards = []
 
-        episode_rewards_history.append(total_reward)
+        for episode in range(batch_size):
+            episode_observations, episode_actions, episode_rewards, total_reward = run_episode(
+                env,
+                weights,
+                bias,
+                rng,
+            )
+
+            returns = compute_discounted_returns(episode_rewards, gamma)
+            returns = normalize(returns)
+
+            grad_weights, grad_bias = compute_policy_gradients(
+                episode_observations,
+                episode_actions,
+                returns,
+                weights,
+                bias,
+            )
+
+            batch_grad_weights += grad_weights
+            batch_grad_bias += grad_bias
+            batch_rewards.append(total_reward)
+            episode_rewards_history.append(total_reward)
+
+        batch_grad_weights /= batch_size
+        batch_grad_bias /= batch_size
 
         weights, bias = update_policy(
-            episode_observations,
-            episode_actions,
-            returns,
             weights,
             bias,
+            batch_grad_weights,
+            batch_grad_bias,
             learning_rate,
         )
 
-        if (episode + 1) % 50 == 0:
+        if (batch + 1) % 5 == 0:
             recent_average = np.mean(episode_rewards_history[-50:])
+            batch_average = np.mean(batch_rewards)
             print(
-                f"Episode {episode + 1}: "
-                f"reward = {total_reward}, "
-                f"average reward = {recent_average:.2f}"
+                f"Batch {batch + 1}: "
+                f"batch average reward = {batch_average:.2f}, "
+                f"recent average reward = {recent_average:.2f}"
             )
+
 
     env.close()
 
