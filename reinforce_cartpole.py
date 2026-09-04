@@ -28,13 +28,28 @@ def main():
     done = False
     total_reward = 0
 
+    episode_obs = []
+    episode_actions = []
+    episode_rewards = []
+
     while not done:
         probs = policy_forward(obs, weights, bias)
         action = rng.choice(2, p=probs)
+
+        episode_obs.append(obs)
+        episode_actions.append(action)
+
         obs, reward, terminated, truncated, info = env.step(action)
+
+        episode_rewards.append(reward)
 
         total_reward += reward
         done = terminated or truncated
+    
+    print("Episode length:", len(episode_rewards))
+    print("First observation:", episode_obs[0])
+    print("First action:", episode_actions[0])
+    print("First reward:", episode_rewards[0])
 
     print("Random policy reward:", total_reward)
     env.close()
