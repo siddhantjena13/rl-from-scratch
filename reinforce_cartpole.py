@@ -96,6 +96,7 @@ def run_episode(env, weights, bias, rng):
 
     return episode_observations, episode_actions, episode_rewards, total_reward
 
+
 def main():
     env = gym.make("CartPole-v1")
 
@@ -105,7 +106,7 @@ def main():
     num_batches = 100
     batch_size = 10
     gamma = 0.99
-    learning_rate = 0.005
+    learning_rate = 0.05
 
     episode_rewards_history = []
 
