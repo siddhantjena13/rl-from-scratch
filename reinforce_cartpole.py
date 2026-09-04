@@ -29,6 +29,28 @@ def compute_discounted_returns(rewards, gamma):
     returns.reverse()
     return np.array(returns)
 
+def normalize(x):
+    return (x - np.mean(x)) / (np.std(x) + 1e-8)
+
+def update_policy(episode_obs, episode_actions, returns, weights, bias, learning_rate):
+    grad_weights = np.zeros_like(weights)
+    grad_bias = np.zeros_like(bias)
+
+    for obs, action, return_t in zip(episode_obs, episode_actions, returns):
+        probs = policy_forward(obs, weights, bias)
+
+        dlogits = probs.copy()
+        dlogits[action] -= 1
+        dlogits *= return_t
+
+        grad_weights += np.outer(obs, dlogits)
+        grad_bias += dlogits
+
+    weights -= learning_rate * grad_weights
+    bias -= learning_rate * grad_bias
+
+    return weights, bias
+
 def main():
     env = gym.make("CartPole-v1")
 
@@ -59,18 +81,20 @@ def main():
     
     gamma = 0.99
     returns = compute_discounted_returns(episode_rewards, gamma)
+    returns = normalize(returns)
 
-    print("Episode length:", len(episode_rewards))
-    print("First observation:", episode_obs[0])
-    print("First action:", episode_actions[0])
-    print("First reward:", episode_rewards[0])
+    learning_rate = 0.01
+    weights, bias = update_policy(
+        episode_obs,
+        episode_actions,
+        returns,
+        weights,
+        bias,
+        learning_rate,
+    )
 
-    print("Random policy reward:", total_reward)
-    
-    print("Returns:", returns)
-    print("First return:", returns[0])
-    print("Last return:", returns[-1])
-    
+    print("Updated weights:", weights)
+    print("Updated bias:", bias)
     env.close()
 
 
