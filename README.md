@@ -21,6 +21,23 @@ By the end, this repository will contain a complete implementation of:
 - Training logs showing learning progress
 - Evaluation of the trained policy
 
+## Current Implementation
+
+The project currently includes:
+
+- A working CartPole training loop
+- A NumPy linear policy
+- Softmax action sampling
+- Episode trajectory collection
+- Discounted return calculation
+- Return normalization
+- Manual policy-gradient computation
+- Batched REINFORCE updates
+- Evaluation using the trained policy
+
+Recent training runs reach substantially better-than-random performance, with
+moving-average rewards in the hundreds of timesteps.
+
 ## Environment
 
 CartPole has:
@@ -51,9 +68,21 @@ implemented directly so that each part of REINFORCE is visible and explainable.
 
 ## Current Status
 
-The project currently starts with a basic CartPole interaction loop. The next
-steps are to replace random actions with a NumPy policy network, collect
-trajectories, and implement the REINFORCE update.
+The current policy is linear:
+
+```text
+observation -> action probabilities
+```
+
+The next milestone is to replace it with a small hidden-layer neural network:
+
+```text
+observation -> hidden layer -> tanh -> action probabilities
+```
+
+This will make the model more expressive while still keeping every part of the
+forward pass, backpropagation, and parameter update implemented from scratch in
+NumPy.
 
 ## Running
 

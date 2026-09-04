@@ -96,6 +96,26 @@ def run_episode(env, weights, bias, rng):
 
     return episode_observations, episode_actions, episode_rewards, total_reward
 
+def evaluate_policy(env, weights, bias, num_episodes):
+    rewards = []
+
+    for _ in range(num_episodes):
+        obs, info = env.reset()
+        done = False
+        total_reward = 0
+
+        while not done:
+            probs = policy_forward(obs, weights, bias)
+            action = np.argmax(probs)
+
+            obs, reward, terminated, truncated, info = env.step(action)
+
+            total_reward += reward
+            done = terminated or truncated
+
+        rewards.append(total_reward)
+
+    return np.mean(rewards)
 
 def main():
     env = gym.make("CartPole-v1")
@@ -159,6 +179,15 @@ def main():
                 f"batch average reward = {batch_average:.2f}, "
                 f"recent average reward = {recent_average:.2f}"
             )
+    
+    evaluation_reward = evaluate_policy(
+        env,
+        weights,
+        bias,
+        num_episodes=20,
+    )
+
+    print(f"Evaluation average reward: {evaluation_reward:.2f}")
 
 
     env.close()
