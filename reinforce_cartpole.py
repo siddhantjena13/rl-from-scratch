@@ -32,11 +32,11 @@ def compute_discounted_returns(rewards, gamma):
 def normalize(x):
     return (x - np.mean(x)) / (np.std(x) + 1e-8)
 
-def update_policy(episode_obs, episode_actions, returns, weights, bias, learning_rate):
+def update_policy(episode_observations, episode_actions, returns, weights, bias, learning_rate):
     grad_weights = np.zeros_like(weights)
     grad_bias = np.zeros_like(bias)
 
-    for obs, action, return_t in zip(episode_obs, episode_actions, returns):
+    for obs, action, return_t in zip(episode_observations, episode_actions, returns):
         probs = policy_forward(obs, weights, bias)
 
         dlogits = probs.copy()
@@ -51,6 +51,30 @@ def update_policy(episode_obs, episode_actions, returns, weights, bias, learning
 
     return weights, bias
 
+def run_episode(env, weights, bias, rng):
+    obs, info = env.reset()
+    done = False
+    total_reward = 0
+
+    episode_observations = []
+    episode_actions = []
+    episode_rewards = []
+
+    while not done:
+        probs = policy_forward(obs, weights, bias)
+        action = rng.choice(2, p=probs)
+
+        episode_observations.append(obs)
+        episode_actions.append(action)
+
+        obs, reward, terminated, truncated, info = env.step(action)
+
+        episode_rewards.append(reward)
+        total_reward += reward
+        done = terminated or truncated
+
+    return episode_observations, episode_actions, episode_rewards, total_reward
+
 def main():
     env = gym.make("CartPole-v1")
 
@@ -59,35 +83,25 @@ def main():
 
     num_episodes = 1000
     gamma = 0.99
-    learning_rate = 0.01
+    learning_rate = 0.005
+
+    episode_rewards_history = []
 
     for episode in range(num_episodes):
-        obs, info = env.reset()
-        done = False
-        total_reward = 0
-
-        episode_obs = []
-        episode_actions = []
-        episode_rewards = []
-
-        while not done:
-            probs = policy_forward(obs, weights, bias)
-            action = rng.choice(2, p=probs)
-
-            episode_obs.append(obs)
-            episode_actions.append(action)
-
-            obs, reward, terminated, truncated, info = env.step(action)
-
-            episode_rewards.append(reward)
-            total_reward += reward
-            done = terminated or truncated
+        episode_observations, episode_actions, episode_rewards, total_reward = run_episode(
+            env,
+            weights,
+            bias,
+            rng,
+        )
 
         returns = compute_discounted_returns(episode_rewards, gamma)
         returns = normalize(returns)
 
+        episode_rewards_history.append(total_reward)
+
         weights, bias = update_policy(
-            episode_obs,
+            episode_observations,
             episode_actions,
             returns,
             weights,
@@ -96,7 +110,12 @@ def main():
         )
 
         if (episode + 1) % 50 == 0:
-            print(f"Episode {episode + 1}: reward = {total_reward}")
+            recent_average = np.mean(episode_rewards_history[-50:])
+            print(
+                f"Episode {episode + 1}: "
+                f"reward = {total_reward}, "
+                f"average reward = {recent_average:.2f}"
+            )
 
     env.close()
 
