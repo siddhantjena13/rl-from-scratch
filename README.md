@@ -7,36 +7,40 @@ The goal is to build the reinforcement learning pipeline from scratch in a
 single Python file, using NumPy for the model math and Gymnasium only for the
 environment.
 
-## Finished Project Goal
+## Project Features
 
-By the end, this repository will contain a complete implementation of:
+This repository contains a complete implementation of:
 
 - A stochastic policy for CartPole
-- A small neural network written with NumPy
+- A small hidden-layer neural network written with NumPy
 - Softmax action probabilities
 - Episode rollout collection
 - Discounted return computation
 - The REINFORCE policy-gradient update
 - Manual gradient calculations and parameter updates
-- Training logs showing learning progress
+- Batched policy-gradient updates
+- Best-policy checkpointing during training
+- Early stopping when the environment is solved
 - Evaluation of the trained policy
 
 ## Current Implementation
 
-The project currently includes:
+The policy network uses one hidden layer:
 
-- A working CartPole training loop
-- A NumPy linear policy
-- Softmax action sampling
-- Episode trajectory collection
-- Discounted return calculation
-- Return normalization
-- Manual policy-gradient computation
-- Batched REINFORCE updates
-- Evaluation using the trained policy
+```text
+observation -> hidden layer -> tanh -> action probabilities
+```
 
-Recent training runs reach substantially better-than-random performance, with
-moving-average rewards in the hundreds of timesteps.
+The implementation is intentionally framework-free. Gymnasium provides the
+CartPole environment, and NumPy handles the policy network, softmax, discounted
+returns, backpropagation, and parameter updates.
+
+One training run solved the environment with:
+
+```text
+Solved at batch 215 with recent average reward 484.84
+Evaluation average reward: 500.00
+```
 
 ## Environment
 
@@ -66,24 +70,6 @@ This is a learning-focused implementation. Instead of using a deep learning
 framework like PyTorch or TensorFlow, the core reinforcement learning logic is
 implemented directly so that each part of REINFORCE is visible and explainable.
 
-## Current Status
-
-The current policy is linear:
-
-```text
-observation -> action probabilities
-```
-
-The next milestone is to replace it with a small hidden-layer neural network:
-
-```text
-observation -> hidden layer -> tanh -> action probabilities
-```
-
-This will make the model more expressive while still keeping every part of the
-forward pass, backpropagation, and parameter update implemented from scratch in
-NumPy.
-
 ## Running
 
 Install dependencies:
@@ -92,7 +78,7 @@ Install dependencies:
 python -m pip install gymnasium numpy
 ```
 
-Run the current scaffold:
+Run training:
 
 ```bash
 python reinforce_cartpole.py
