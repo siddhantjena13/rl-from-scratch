@@ -60,16 +60,3 @@ Run the current REINFORCE project:
 python reinforce_numpy/reinforce_cartpole.py
 ```
 
-## Why This Repo
-
-The point is not just to get high rewards. The point is to make each algorithm
-explainable:
-
-- What objective is being optimized?
-- What data is collected from the environment?
-- How are returns or advantages computed?
-- Where do the gradients come from?
-- What changes when we add a baseline or move to actor-critic?
-
-The early projects intentionally avoid high-level RL libraries so the learning
-signal, gradient flow, and training behavior stay visible.
