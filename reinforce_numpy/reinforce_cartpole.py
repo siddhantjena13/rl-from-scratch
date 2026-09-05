@@ -117,6 +117,67 @@ def evaluate_policy(env, w1, b1, w2, b2, num_episodes):
 
     return np.mean(rewards)
 
+def initialize_value_fn(input_dim, hidden_dim, rng):
+    vw1 = rng.normal(loc=0.0, scale=0.01, size=(input_dim, hidden_dim))
+    vb1 = np.zeros(hidden_dim)
+
+    vw2 = rng.normal(loc=0.0, scale=0.01, size=(hidden_dim, 1))
+    vb2 = np.zeros(1)
+
+    return vw1, vb1, vw2, vb2
+
+
+def value_forward(obs, vw1, vb1, vw2, vb2):
+    hidden_pre = obs @ vw1 + vb1
+    hidden = np.tanh(hidden_pre)
+
+    value = hidden @ vw2 + vb2
+
+    return value[0], hidden
+
+def compute_advantages(episode_observations, returns, vw1, vb1, vw2, vb2):
+    advantages = []
+
+    for obs, actual_return in zip(episode_observations, returns):
+        # ask the value network: "how good did you think this state was?"
+        predicted_value, _ = value_forward(obs, vw1, vb1, vw2, vb2)
+
+        # the advantage is how much better (or worse) the real outcome was
+        advantage = actual_return - predicted_value
+        advantages.append(advantage)
+
+    return np.array(advantages)
+
+def compute_value_gradients(episode_observations, returns, vw1, vb1, vw2, vb2):
+    grad_vw1 = np.zeros_like(vw1)
+    grad_vb1 = np.zeros_like(vb1)
+    grad_vw2 = np.zeros_like(vw2)
+    grad_vb2 = np.zeros_like(vb2)
+
+    for obs, actual_return in zip(episode_observations, returns):
+        predicted_value, hidden = value_forward(obs, vw1, vb1, vw2, vb2)
+
+        # how far off was our prediction? this is the gradient of the
+        # squared error loss with respect to the network's output
+        d_value = predicted_value - actual_return
+
+        # gradient for the second layer (hidden -> output)
+        grad_vw2 += np.outer(hidden, d_value)
+        grad_vb2 += d_value
+
+        # backpropagate the error through the second layer's weights
+        d_hidden = vw2.flatten() * d_value
+
+        # backpropagate through the tanh activation
+        # (derivative of tanh(x) is 1 - tanh(x)^2)
+        d_hidden_before_activation = d_hidden * (1 - hidden ** 2)
+
+        # gradient for the first layer (input -> hidden)
+        grad_vw1 += np.outer(obs, d_hidden_before_activation)
+        grad_vb1 += d_hidden_before_activation
+
+    return grad_vw1, grad_vb1, grad_vw2, grad_vb2
+
 def main():
     env = gym.make("CartPole-v1")
 
