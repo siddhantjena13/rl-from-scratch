@@ -128,10 +128,14 @@ def main():
         rng=rng,
     )
 
-    num_batches = 100
+    num_batches = 300
     batch_size = 10
     gamma = 0.99
-    learning_rate = 0.02
+    learning_rate = 0.04
+    solved_reward = 475
+
+    best_recent_average = -np.inf
+    best_params = None
 
     episode_rewards_history = []
 
@@ -194,12 +198,35 @@ def main():
         if (batch + 1) % 5 == 0:
             recent_average = np.mean(episode_rewards_history[-50:])
             batch_average = np.mean(batch_rewards)
+
             print(
                 f"Batch {batch + 1}: "
                 f"batch average reward = {batch_average:.2f}, "
                 f"recent average reward = {recent_average:.2f}"
             )
-    
+
+            if recent_average > best_recent_average:
+                best_recent_average = recent_average
+                best_params = (
+                    w1.copy(),
+                    b1.copy(),
+                    w2.copy(),
+                    b2.copy(),
+                )
+
+            if recent_average >= solved_reward:
+                print(
+                    f"Solved at batch {batch + 1} "
+                    f"with recent average reward {recent_average:.2f}"
+                )
+                break
+            
+    print("Training complete.")
+
+    if best_params is not None:
+        w1, b1, w2, b2 = best_params
+        print(f"Restored best policy with recent average reward {best_recent_average:.2f}")
+
     evaluation_reward = evaluate_policy(
         env,
         w1,
@@ -210,6 +237,7 @@ def main():
     )
 
     print(f"Evaluation average reward: {evaluation_reward:.2f}")
+    print(f"Best recent average reward: {best_recent_average:.2f}")
 
 
     env.close()
