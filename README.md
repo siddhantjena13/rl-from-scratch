@@ -1,85 +1,75 @@
-# REINFORCE From Scratch on CartPole
+# RL From Scratch
 
-This project implements the REINFORCE policy-gradient algorithm on the
-`CartPole-v1` environment from Gymnasium.
+This repository is a long-term reinforcement learning playground. The goal is
+to build core RL algorithms step by step, starting with small environments where
+the math is visible, then moving toward more scalable PyTorch implementations.
 
-The goal is to build the reinforcement learning pipeline from scratch in a
-single Python file, using NumPy for the model math and Gymnasium only for the
-environment.
+The first project is a NumPy implementation of REINFORCE on `CartPole-v1`.
 
-## Project Features
+## Roadmap
 
-This repository contains a complete implementation of:
+- REINFORCE with manual NumPy gradients
+- REINFORCE with a learned value baseline
+- Advantage actor-critic
+- PyTorch versions of the same algorithms
+- PPO
+- Larger experiments with cleaner result tracking
 
-- A stochastic policy for CartPole
-- A small hidden-layer neural network written with NumPy
-- Softmax action probabilities
-- Episode rollout collection
-- Discounted return computation
-- The REINFORCE policy-gradient update
-- Manual gradient calculations and parameter updates
-- Batched policy-gradient updates
-- Best-policy checkpointing during training
-- Early stopping when the environment is solved
-- Evaluation of the trained policy
+## Projects
 
-## Current Implementation
+| Project | Environment | Implementation | Status |
+| --- | --- | --- | --- |
+| [REINFORCE NumPy](reinforce_numpy/README.md) | CartPole-v1 | NumPy + Gymnasium | Solves CartPole |
 
-The policy network uses one hidden layer:
+## Current Result
 
-```text
-observation -> hidden layer -> tanh -> action probabilities
-```
+The first implementation trains a hidden-layer stochastic policy with manual
+backpropagation and batched REINFORCE updates.
 
-The implementation is intentionally framework-free. Gymnasium provides the
-CartPole environment, and NumPy handles the policy network, softmax, discounted
-returns, backpropagation, and parameter updates.
-
-One training run solved the environment with:
+One training run reached:
 
 ```text
 Solved at batch 215 with recent average reward 484.84
 Evaluation average reward: 500.00
 ```
 
-## Environment
-
-CartPole has:
-
-- Observation space: 4 continuous values
-- Action space: 2 discrete actions
-- Reward: `+1` for every step the pole remains balanced
-- Maximum episode length: 500 steps for `CartPole-v1`
-
-The policy receives the observation:
+## Repository Layout
 
 ```text
-[cart position, cart velocity, pole angle, pole angular velocity]
+rl-from-scratch/
+├── README.md
+├── requirements.txt
+├── reinforce_numpy/
+│   ├── README.md
+│   └── reinforce_cartpole.py
+├── results/
+└── notes/
 ```
 
-and outputs a probability distribution over:
-
-```text
-0 = push left
-1 = push right
-```
-
-## Why This Project
-
-This is a learning-focused implementation. Instead of using a deep learning
-framework like PyTorch or TensorFlow, the core reinforcement learning logic is
-implemented directly so that each part of REINFORCE is visible and explainable.
-
-## Running
+## Setup
 
 Install dependencies:
 
 ```bash
-python -m pip install gymnasium numpy
+python -m pip install -r requirements.txt
 ```
 
-Run training:
+Run the current REINFORCE project:
 
 ```bash
-python reinforce_cartpole.py
+python reinforce_numpy/reinforce_cartpole.py
 ```
+
+## Why This Repo
+
+The point is not just to get high rewards. The point is to make each algorithm
+explainable:
+
+- What objective is being optimized?
+- What data is collected from the environment?
+- How are returns or advantages computed?
+- Where do the gradients come from?
+- What changes when we add a baseline or move to actor-critic?
+
+The early projects intentionally avoid high-level RL libraries so the learning
+signal, gradient flow, and training behavior stay visible.
