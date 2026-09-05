@@ -80,6 +80,7 @@ def run_episode(env, w1, b1, w2, b2, rng):
     episode_observations = []
     episode_actions = []
     episode_rewards = []
+    episode_action_probs = []  #remember how likely each action was, at the time we took it
 
     while not done:
         probs, _ = policy_forward(obs, w1, b1, w2, b2)
@@ -88,13 +89,17 @@ def run_episode(env, w1, b1, w2, b2, rng):
         episode_observations.append(obs)
         episode_actions.append(action)
 
+        #save the probability the policy assigned to the action we picked.
+        # this is our "old" probability — a snapshot, frozen at collection time
+        episode_action_probs.append(probs[action])
+
         obs, reward, terminated, truncated, info = env.step(action)
 
         episode_rewards.append(reward)
         total_reward += reward
         done = terminated or truncated
 
-    return episode_observations, episode_actions, episode_rewards, total_reward
+    return episode_observations, episode_actions, episode_rewards, episode_action_probs, total_reward
 
 def evaluate_policy(env, w1, b1, w2, b2, num_episodes):
     rewards = []
