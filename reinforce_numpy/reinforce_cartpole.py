@@ -178,6 +178,16 @@ def compute_value_gradients(episode_observations, returns, vw1, vb1, vw2, vb2):
 
     return grad_vw1, grad_vb1, grad_vw2, grad_vb2
 
+def update_value_fn(vw1, vb1, vw2, vb2, grad_vw1, grad_vb1, grad_vw2, grad_vb2, learning_rate):
+    # move the weights a little bit in the direction that reduces
+    # the value network's prediction error
+    vw1 -= learning_rate * grad_vw1
+    vb1 -= learning_rate * grad_vb1
+    vw2 -= learning_rate * grad_vw2
+    vb2 -= learning_rate * grad_vb2
+
+    return vw1, vb1, vw2, vb2
+
 def main():
     env = gym.make("CartPole-v1")
 
@@ -189,10 +199,18 @@ def main():
         rng=rng,
     )
 
+    # NEW: create the value network's starting weights too
+    vw1, vb1, vw2, vb2 = initialize_value_fn(
+        input_dim=4,
+        hidden_dim=16,
+        rng=rng,
+    )
+
     num_batches = 300
     batch_size = 10
     gamma = 0.99
     learning_rate = 0.04
+    value_learning_rate = 0.001  
     solved_reward = 475
 
     best_recent_average = -np.inf
@@ -205,6 +223,12 @@ def main():
         batch_grad_b1 = np.zeros_like(b1)
         batch_grad_w2 = np.zeros_like(w2)
         batch_grad_b2 = np.zeros_like(b2)
+
+        # NEW: separate accumulators for the value network's gradients
+        batch_grad_vw1 = np.zeros_like(vw1)
+        batch_grad_vb1 = np.zeros_like(vb1)
+        batch_grad_vw2 = np.zeros_like(vw2)
+        batch_grad_vb2 = np.zeros_like(vb2)
 
         batch_rewards = []
 
@@ -219,22 +243,51 @@ def main():
             )
 
             returns = compute_discounted_returns(episode_rewards, gamma)
-            returns = normalize(returns)
 
+            # NEW: ask the value network how good it thought each state was,
+            # and use the difference from the real return as the advantage
+            advantages = compute_advantages(
+                episode_observations,
+                returns,
+                vw1,
+                vb1,
+                vw2,
+                vb2,
+            )
+            advantages = normalize(advantages)
+
+            # CHANGED: the policy gradient now uses advantages, not raw returns
             grad_w1, grad_b1, grad_w2, grad_b2 = compute_policy_gradients(
                 episode_observations,
                 episode_actions,
-                returns,
+                advantages,
                 w1,
                 b1,
                 w2,
                 b2,
             )
 
+            # NEW: also compute how the value network should update itself,
+            # using the un-normalized returns as its training target
+            grad_vw1, grad_vb1, grad_vw2, grad_vb2 = compute_value_gradients(
+                episode_observations,
+                returns,
+                vw1,
+                vb1,
+                vw2,
+                vb2,
+            )
+
             batch_grad_w1 += grad_w1
             batch_grad_b1 += grad_b1
             batch_grad_w2 += grad_w2
             batch_grad_b2 += grad_b2
+
+            # NEW: accumulate the value network's gradients too
+            batch_grad_vw1 += grad_vw1
+            batch_grad_vb1 += grad_vb1
+            batch_grad_vw2 += grad_vw2
+            batch_grad_vb2 += grad_vb2
 
             batch_rewards.append(total_reward)
             episode_rewards_history.append(total_reward)
@@ -243,6 +296,12 @@ def main():
         batch_grad_b1 /= batch_size
         batch_grad_w2 /= batch_size
         batch_grad_b2 /= batch_size
+
+        # NEW: average the value network's gradients over the batch too
+        batch_grad_vw1 /= batch_size
+        batch_grad_vb1 /= batch_size
+        batch_grad_vw2 /= batch_size
+        batch_grad_vb2 /= batch_size
 
         w1, b1, w2, b2 = update_policy(
             w1,
@@ -255,6 +314,22 @@ def main():
             batch_grad_b2,
             learning_rate,
         )
+
+        # NEW: update the value network's weights too
+        vw1, vb1, vw2, vb2 = update_value_fn(
+            vw1,
+            vb1,
+            vw2,
+            vb2,
+            batch_grad_vw1,
+            batch_grad_vb1,
+            batch_grad_vw2,
+            batch_grad_vb2,
+            value_learning_rate,
+        )
+
+        # (the rest of the loop — printing progress, checkpointing best_params,
+        # checking solved_reward — stays exactly the same as before)
 
         if (batch + 1) % 5 == 0:
             recent_average = np.mean(episode_rewards_history[-50:])
