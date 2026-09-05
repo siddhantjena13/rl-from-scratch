@@ -7,16 +7,24 @@ def softmax(logits):
     return exp_logits / np.sum(exp_logits)
 
 
-def initialize_policy(input_dim, output_dim, rng):
-    weights = rng.normal(loc=0.0, scale=0.01, size=(input_dim, output_dim))
-    bias = np.zeros(output_dim)
-    return weights, bias
+def initialize_policy(input_dim, hidden_dim, output_dim, rng):
+    w1 = rng.normal(loc=0.0, scale=0.01, size=(input_dim, hidden_dim))
+    b1 = np.zeros(hidden_dim)
+
+    w2 = rng.normal(loc=0.0, scale=0.01, size=(hidden_dim, output_dim))
+    b2 = np.zeros(output_dim)
+
+    return w1, b1, w2, b2
 
 
-def policy_forward(obs, weights, bias):
-    logits = obs @ weights + bias
+def policy_forward(obs, w1, b1, w2, b2):
+    hidden_pre = obs @ w1 + b1
+    hidden = np.tanh(hidden_pre)
+
+    logits = hidden @ w2 + b2
     probs = softmax(logits)
-    return probs
+
+    return probs, hidden
 
 def compute_discounted_returns(rewards, gamma):
     returns = []
@@ -32,47 +40,39 @@ def compute_discounted_returns(rewards, gamma):
 def normalize(x):
     return (x - np.mean(x)) / (np.std(x) + 1e-8)
 
-def update_policy(episode_observations, episode_actions, returns, weights, bias, learning_rate):
-    grad_weights = np.zeros_like(weights)
-    grad_bias = np.zeros_like(bias)
+def compute_policy_gradients(episode_observations, episode_actions, returns, w1, b1, w2, b2):
+    grad_w1 = np.zeros_like(w1)
+    grad_b1 = np.zeros_like(b1)
+    grad_w2 = np.zeros_like(w2)
+    grad_b2 = np.zeros_like(b2)
 
     for obs, action, return_t in zip(episode_observations, episode_actions, returns):
-        probs = policy_forward(obs, weights, bias)
+        probs, hidden = policy_forward(obs, w1, b1, w2, b2)
 
         dlogits = probs.copy()
         dlogits[action] -= 1
         dlogits *= return_t
 
-        grad_weights += np.outer(obs, dlogits)
-        grad_bias += dlogits
+        grad_w2 += np.outer(hidden, dlogits)
+        grad_b2 += dlogits
 
-    weights -= learning_rate * grad_weights
-    bias -= learning_rate * grad_bias
+        dhidden = w2 @ dlogits
+        dhidden_pre = dhidden * (1 - hidden ** 2)
 
-    return weights, bias
+        grad_w1 += np.outer(obs, dhidden_pre)
+        grad_b1 += dhidden_pre
 
-def compute_policy_gradients(episode_observations, episode_actions, returns, weights, bias):
-    grad_weights = np.zeros_like(weights)
-    grad_bias = np.zeros_like(bias)
+    return grad_w1, grad_b1, grad_w2, grad_b2
 
-    for obs, action, return_t in zip(episode_observations, episode_actions, returns):
-        probs = policy_forward(obs, weights, bias)
+def update_policy(w1, b1, w2, b2, grad_w1, grad_b1, grad_w2, grad_b2, learning_rate):
+    w1 -= learning_rate * grad_w1
+    b1 -= learning_rate * grad_b1
+    w2 -= learning_rate * grad_w2
+    b2 -= learning_rate * grad_b2
 
-        dlogits = probs.copy()
-        dlogits[action] -= 1
-        dlogits *= return_t
+    return w1, b1, w2, b2
 
-        grad_weights += np.outer(obs, dlogits)
-        grad_bias += dlogits
-
-    return grad_weights, grad_bias
-
-def update_policy(weights, bias, grad_weights, grad_bias, learning_rate):
-    weights -= learning_rate * grad_weights
-    bias -= learning_rate * grad_bias
-    return weights, bias
-
-def run_episode(env, weights, bias, rng):
+def run_episode(env, w1, b1, w2, b2, rng):
     obs, info = env.reset()
     done = False
     total_reward = 0
@@ -82,7 +82,7 @@ def run_episode(env, weights, bias, rng):
     episode_rewards = []
 
     while not done:
-        probs = policy_forward(obs, weights, bias)
+        probs, _ = policy_forward(obs, w1, b1, w2, b2)
         action = rng.choice(2, p=probs)
 
         episode_observations.append(obs)
@@ -96,7 +96,7 @@ def run_episode(env, weights, bias, rng):
 
     return episode_observations, episode_actions, episode_rewards, total_reward
 
-def evaluate_policy(env, weights, bias, num_episodes):
+def evaluate_policy(env, w1, b1, w2, b2, num_episodes):
     rewards = []
 
     for _ in range(num_episodes):
@@ -105,7 +105,7 @@ def evaluate_policy(env, weights, bias, num_episodes):
         total_reward = 0
 
         while not done:
-            probs = policy_forward(obs, weights, bias)
+            probs, _ = policy_forward(obs, w1, b1, w2, b2)
             action = np.argmax(probs)
 
             obs, reward, terminated, truncated, info = env.step(action)
@@ -121,53 +121,73 @@ def main():
     env = gym.make("CartPole-v1")
 
     rng = np.random.default_rng(42)
-    weights, bias = initialize_policy(input_dim=4, output_dim=2, rng=rng)
+    w1, b1, w2, b2 = initialize_policy(
+        input_dim=4,
+        hidden_dim=16,
+        output_dim=2,
+        rng=rng,
+    )
 
     num_batches = 100
     batch_size = 10
     gamma = 0.99
-    learning_rate = 0.05
+    learning_rate = 0.02
 
     episode_rewards_history = []
 
     for batch in range(num_batches):
-        batch_grad_weights = np.zeros_like(weights)
-        batch_grad_bias = np.zeros_like(bias)
+        batch_grad_w1 = np.zeros_like(w1)
+        batch_grad_b1 = np.zeros_like(b1)
+        batch_grad_w2 = np.zeros_like(w2)
+        batch_grad_b2 = np.zeros_like(b2)
 
         batch_rewards = []
 
         for episode in range(batch_size):
             episode_observations, episode_actions, episode_rewards, total_reward = run_episode(
                 env,
-                weights,
-                bias,
+                w1,
+                b1,
+                w2,
+                b2,
                 rng,
             )
 
             returns = compute_discounted_returns(episode_rewards, gamma)
             returns = normalize(returns)
 
-            grad_weights, grad_bias = compute_policy_gradients(
+            grad_w1, grad_b1, grad_w2, grad_b2 = compute_policy_gradients(
                 episode_observations,
                 episode_actions,
                 returns,
-                weights,
-                bias,
+                w1,
+                b1,
+                w2,
+                b2,
             )
 
-            batch_grad_weights += grad_weights
-            batch_grad_bias += grad_bias
+            batch_grad_w1 += grad_w1
+            batch_grad_b1 += grad_b1
+            batch_grad_w2 += grad_w2
+            batch_grad_b2 += grad_b2
+
             batch_rewards.append(total_reward)
             episode_rewards_history.append(total_reward)
 
-        batch_grad_weights /= batch_size
-        batch_grad_bias /= batch_size
+        batch_grad_w1 /= batch_size
+        batch_grad_b1 /= batch_size
+        batch_grad_w2 /= batch_size
+        batch_grad_b2 /= batch_size
 
-        weights, bias = update_policy(
-            weights,
-            bias,
-            batch_grad_weights,
-            batch_grad_bias,
+        w1, b1, w2, b2 = update_policy(
+            w1,
+            b1,
+            w2,
+            b2,
+            batch_grad_w1,
+            batch_grad_b1,
+            batch_grad_w2,
+            batch_grad_b2,
             learning_rate,
         )
 
@@ -182,8 +202,10 @@ def main():
     
     evaluation_reward = evaluate_policy(
         env,
-        weights,
-        bias,
+        w1,
+        b1,
+        w2,
+        b2,
         num_episodes=20,
     )
 
