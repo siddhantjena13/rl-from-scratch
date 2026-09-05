@@ -193,6 +193,52 @@ def update_value_fn(vw1, vb1, vw2, vb2, grad_vw1, grad_vb1, grad_vw2, grad_vb2, 
 
     return vw1, vb1, vw2, vb2
 
+def compute_ppo_policy_gradients(episode_observations, episode_actions, old_action_probs, advantages, w1, b1, w2, b2, clip_epsilon):
+    grad_w1 = np.zeros_like(w1)
+    grad_b1 = np.zeros_like(b1)
+    grad_w2 = np.zeros_like(w2)
+    grad_b2 = np.zeros_like(b2)
+
+    for obs, action, old_prob, advantage in zip(episode_observations, episode_actions, old_action_probs, advantages):
+        # ask the CURRENT (possibly already-updated) policy what it thinks now
+        probs, hidden = policy_forward(obs, w1, b1, w2, b2)
+        new_prob = probs[action]
+
+        # the ratio: how much more (or less) likely is this action now,
+        # compared to when we collected the data?
+        ratio = new_prob / old_prob
+
+        # the two candidate objectives PPO chooses between
+        unclipped_objective = ratio * advantage
+        clipped_ratio = np.clip(ratio, 1 - clip_epsilon, 1 + clip_epsilon)
+        clipped_objective = clipped_ratio * advantage
+
+        # PPO takes whichever is SMALLER. this is the whole trick:
+        # it removes the incentive to keep pushing the ratio further
+        # once clipping has kicked in
+        if unclipped_objective <= clipped_objective:
+            d_objective_d_ratio = advantage
+        else:
+            d_objective_d_ratio = 0.0
+
+        # chain rule: d(ratio)/d(logits) = ratio * (onehot(action) - probs)
+        # this comes from differentiating softmax - same math you already
+        # used in compute_policy_gradients, just multiplied by "ratio" now
+        dlogits = probs.copy()
+        dlogits[action] -= 1
+        dlogits *= -(d_objective_d_ratio * ratio)  # negative sign flips this into "descent" form, matching your existing w -= lr * grad pattern
+
+        grad_w2 += np.outer(hidden, dlogits)
+        grad_b2 += dlogits
+
+        dhidden = w2 @ dlogits
+        dhidden_pre = dhidden * (1 - hidden ** 2)
+
+        grad_w1 += np.outer(obs, dhidden_pre)
+        grad_b1 += dhidden_pre
+
+    return grad_w1, grad_b1, grad_w2, grad_b2
+
 def main():
     env = gym.make("CartPole-v1")
 
