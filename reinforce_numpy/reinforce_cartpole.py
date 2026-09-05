@@ -243,144 +243,81 @@ def main():
     env = gym.make("CartPole-v1")
 
     rng = np.random.default_rng(42)
-    w1, b1, w2, b2 = initialize_policy(
-        input_dim=4,
-        hidden_dim=16,
-        output_dim=2,
-        rng=rng,
-    )
-
-    # NEW: create the value network's starting weights too
-    vw1, vb1, vw2, vb2 = initialize_value_fn(
-        input_dim=4,
-        hidden_dim=16,
-        rng=rng,
-    )
+    w1, b1, w2, b2 = initialize_policy(input_dim=4, hidden_dim=16, output_dim=2, rng=rng)
+    vw1, vb1, vw2, vb2 = initialize_value_fn(input_dim=4, hidden_dim=16, rng=rng)
 
     num_batches = 300
     batch_size = 10
     gamma = 0.99
-    learning_rate = 0.04
-    value_learning_rate = 0.001  
+    learning_rate = 0.01           # NOTE: often needs to be a bit smaller for PPO, since we now take several steps per batch
+    value_learning_rate = 0.001
+    clip_epsilon = 0.2             # NEW: how far the ratio is allowed to drift before clipping kicks in
+    ppo_epochs = 4                 # NEW: how many gradient passes to take over each batch of collected data
     solved_reward = 475
 
     best_recent_average = -np.inf
     best_params = None
-
     episode_rewards_history = []
 
     for batch in range(num_batches):
-        batch_grad_w1 = np.zeros_like(w1)
-        batch_grad_b1 = np.zeros_like(b1)
-        batch_grad_w2 = np.zeros_like(w2)
-        batch_grad_b2 = np.zeros_like(b2)
-
-        # NEW: separate accumulators for the value network's gradients
-        batch_grad_vw1 = np.zeros_like(vw1)
-        batch_grad_vb1 = np.zeros_like(vb1)
-        batch_grad_vw2 = np.zeros_like(vw2)
-        batch_grad_vb2 = np.zeros_like(vb2)
-
+        # --- STEP 1: collect one batch of data with the CURRENT policy ---
+        # this part is unchanged in structure - just now also saving old_action_probs
+        batch_observations = []
+        batch_actions = []
+        batch_old_probs = []
+        batch_advantages = []
+        batch_returns = []
         batch_rewards = []
 
         for episode in range(batch_size):
-            episode_observations, episode_actions, episode_rewards, total_reward = run_episode(
-                env,
-                w1,
-                b1,
-                w2,
-                b2,
-                rng,
+            episode_observations, episode_actions, episode_rewards, episode_action_probs, total_reward = run_episode(
+                env, w1, b1, w2, b2, rng,
             )
 
             returns = compute_discounted_returns(episode_rewards, gamma)
-
-            # NEW: ask the value network how good it thought each state was,
-            # and use the difference from the real return as the advantage
-            advantages = compute_advantages(
-                episode_observations,
-                returns,
-                vw1,
-                vb1,
-                vw2,
-                vb2,
-            )
+            advantages = compute_advantages(episode_observations, returns, vw1, vb1, vw2, vb2)
             advantages = normalize(advantages)
 
-            # CHANGED: the policy gradient now uses advantages, not raw returns
-            grad_w1, grad_b1, grad_w2, grad_b2 = compute_policy_gradients(
-                episode_observations,
-                episode_actions,
-                advantages,
-                w1,
-                b1,
-                w2,
-                b2,
-            )
-
-            # NEW: also compute how the value network should update itself,
-            # using the un-normalized returns as its training target
-            grad_vw1, grad_vb1, grad_vw2, grad_vb2 = compute_value_gradients(
-                episode_observations,
-                returns,
-                vw1,
-                vb1,
-                vw2,
-                vb2,
-            )
-
-            batch_grad_w1 += grad_w1
-            batch_grad_b1 += grad_b1
-            batch_grad_w2 += grad_w2
-            batch_grad_b2 += grad_b2
-
-            # NEW: accumulate the value network's gradients too
-            batch_grad_vw1 += grad_vw1
-            batch_grad_vb1 += grad_vb1
-            batch_grad_vw2 += grad_vw2
-            batch_grad_vb2 += grad_vb2
+            # NEW: instead of updating right away, we just COLLECT everything
+            # from this episode into one big batch, to reuse for several updates
+            batch_observations.extend(episode_observations)
+            batch_actions.extend(episode_actions)
+            batch_old_probs.extend(episode_action_probs)
+            batch_advantages.extend(advantages)
+            batch_returns.extend(returns)
 
             batch_rewards.append(total_reward)
             episode_rewards_history.append(total_reward)
 
-        batch_grad_w1 /= batch_size
-        batch_grad_b1 /= batch_size
-        batch_grad_w2 /= batch_size
-        batch_grad_b2 /= batch_size
+        batch_advantages = np.array(batch_advantages)
+        batch_returns = np.array(batch_returns)
 
-        # NEW: average the value network's gradients over the batch too
-        batch_grad_vw1 /= batch_size
-        batch_grad_vb1 /= batch_size
-        batch_grad_vw2 /= batch_size
-        batch_grad_vb2 /= batch_size
+        # --- STEP 2: take MULTIPLE gradient steps over this one batch ---
+        # this loop is the actual new part - everything above was just
+        # renaming/reorganizing what you already had
+        for epoch in range(ppo_epochs):
+            grad_w1, grad_b1, grad_w2, grad_b2 = compute_ppo_policy_gradients(
+                batch_observations, batch_actions, batch_old_probs, batch_advantages,
+                w1, b1, w2, b2, clip_epsilon,
+            )
+            grad_w1 /= len(batch_observations)
+            grad_b1 /= len(batch_observations)
+            grad_w2 /= len(batch_observations)
+            grad_b2 /= len(batch_observations)
 
-        w1, b1, w2, b2 = update_policy(
-            w1,
-            b1,
-            w2,
-            b2,
-            batch_grad_w1,
-            batch_grad_b1,
-            batch_grad_w2,
-            batch_grad_b2,
-            learning_rate,
-        )
+            w1, b1, w2, b2 = update_policy(w1, b1, w2, b2, grad_w1, grad_b1, grad_w2, grad_b2, learning_rate)
 
-        # NEW: update the value network's weights too
-        vw1, vb1, vw2, vb2 = update_value_fn(
-            vw1,
-            vb1,
-            vw2,
-            vb2,
-            batch_grad_vw1,
-            batch_grad_vb1,
-            batch_grad_vw2,
-            batch_grad_vb2,
-            value_learning_rate,
-        )
+            # value network also gets updated every epoch, using the same batch
+            grad_vw1, grad_vb1, grad_vw2, grad_vb2 = compute_value_gradients(
+                batch_observations, batch_returns, vw1, vb1, vw2, vb2,
+            )
+            grad_vw1 /= len(batch_observations)
+            grad_vb1 /= len(batch_observations)
+            grad_vw2 /= len(batch_observations)
+            grad_vb2 /= len(batch_observations)
 
-        # (the rest of the loop — printing progress, checkpointing best_params,
-        # checking solved_reward — stays exactly the same as before)
+            vw1, vb1, vw2, vb2 = update_value_fn(vw1, vb1, vw2, vb2, grad_vw1, grad_vb1, grad_vw2, grad_vb2, value_learning_rate)
+
 
         if (batch + 1) % 5 == 0:
             recent_average = np.mean(episode_rewards_history[-50:])
