@@ -95,6 +95,7 @@ def value_forward(obs, vw1, vb1, vw2, vb2):
 def compute_td_errors(episode_observations, episode_rewards, episode_next_observations,
                       episode_terminated, gamma, vw1, vb1, vw2, vb2):
     td_errors = []
+    td_targets = []
 
     for obs, reward, next_obs, terminated in zip(
         episode_observations, episode_rewards, episode_next_observations, episode_terminated
@@ -102,18 +103,19 @@ def compute_td_errors(episode_observations, episode_rewards, episode_next_observ
         value, _ = value_forward(obs, vw1, vb1, vw2, vb2)
 
         if terminated:
-            # pole fell. no future, so nothing to bootstrap from.
             next_value = 0.0
         else:
             next_value, _ = value_forward(next_obs, vw1, vb1, vw2, vb2)
 
-        # r + gamma*V(s') is our estimate of what this state was actually worth.
-        # V(s) was our guess before we took the step. the gap between them is
-        # the TD error - it serves as both the advantage and the critic's
-        # training signal.
-        td_errors.append(reward + gamma * next_value - value)
+        # what this state turned out to be worth, using one real reward and the
+        # critic's guess for everything after. this is both the critic's
+        # regression target and, minus the old guess, the policy's advantage.
+        target = reward + gamma * next_value
 
-    return np.array(td_errors)
+        td_targets.append(target)
+        td_errors.append(target - value)
+
+    return np.array(td_errors), np.array(td_targets)
 
 
 def compute_value_gradients(batch_observations, batch_returns, vw1, vb1, vw2, vb2):
@@ -288,7 +290,7 @@ def episodes_to_solve(episode_rewards_history, threshold=475.0, window=50):
 
 
 def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0.99,
-          learning_rate=2.0, value_learning_rate=0.05, hidden_dim=16, eval_episodes=20, verbose=True):
+          learning_rate=2.0, value_learning_rate=0.5, hidden_dim=16, eval_episodes=20, verbose=True):
     env = make_env(seed)
     eval_env = make_env(seed + 10000)
     rng = np.random.default_rng(seed)
@@ -314,13 +316,14 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
                 env, w1, b1, w2, b2, rng,
             )
 
-            returns = compute_discounted_returns(episode_rewards, gamma)
-
             # the only line that differs from reinforce.py: the weight on
             # grad-log-pi is the advantage rather than the raw return. note the
             # critic is evaluated here, BEFORE it is updated below, so the
             # baseline is the one that was in force when the data was collected.
-            advantages = compute_td_errors(episode_observations, episode_rewards, episode_next_observations, episode_terminated, gamma, vw1, vb1, vw2, vb2)
+            advantages, value_targets = compute_td_errors(
+                    episode_observations, episode_rewards, episode_next_observations,
+                    episode_terminated, gamma, vw1, vb1, vw2, vb2,
+                )
             # "episode": normalize inside each episode. a 500-step episode and a
             # 20-step episode both come out mean 0 std 1, so the update can no
             # longer tell that one of them was much better than the other - only
@@ -342,7 +345,7 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
             batch_hidden.extend(episode_hidden)
             batch_probs.extend(episode_probs)
             batch_weights.extend(advantages)
-            batch_returns.extend(returns)
+            batch_returns.extend(value_targets)
 
             batch_rewards.append(total_reward)
             episode_rewards_history.append(total_reward)
@@ -396,7 +399,7 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
     eval_env.close()
 
     return {
-        "algorithm": "reinforce_baseline",
+        "algorithm": "a2c",
         "normalization": normalization,
         "seed": seed,
         "episode_returns": episode_rewards_history,
