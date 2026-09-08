@@ -231,9 +231,9 @@ def run_episode(env, w1, b1, w2, b2, rng):
         done = terminated or truncated
         obs = next_obs
 
-        return (episode_observations, episode_actions, episode_rewards, episode_hidden,
-            episode_probs, episode_next_observations, episode_terminated,
-            episode_old_probs, total_reward)
+    return (episode_observations, episode_actions, episode_rewards, episode_hidden,
+        episode_probs, episode_next_observations, episode_terminated,
+        episode_old_probs, total_reward)
 
 
 def evaluate_policy(env, w1, b1, w2, b2, num_episodes, seed):
@@ -275,7 +275,8 @@ def episodes_to_solve(episode_rewards_history, threshold=475.0, window=50):
 
 
 def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0.99,
-          learning_rate=2.0, value_learning_rate=0.5, hidden_dim=16, eval_episodes=20, verbose=True):
+          learning_rate=0.5, value_learning_rate=0.1, clip_epsilon=0.2, ppo_epochs=4,
+          hidden_dim=16, eval_episodes=20, verbose=True):
     env = make_env(seed)
     eval_env = make_env(seed + 10000)
     rng = np.random.default_rng(seed)
@@ -343,23 +344,26 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
         if normalization == "batch":
             batch_weights = normalize(batch_weights)
 
-        grad_w1, grad_b1, grad_w2, grad_b2 = compute_policy_gradients(
-            batch_observations, batch_actions, batch_hidden, batch_probs, batch_weights,
-            w1, b1, w2, b2,
-        )
+        # several passes over the same batch. this is why the clip exists: by
+        # epoch 2 the policy has moved, so the data was collected by a policy we
+        # no longer have, and the ratio starts drifting from 1.
+        for epoch in range(ppo_epochs):
+            grad_w1, grad_b1, grad_w2, grad_b2 = compute_ppo_policy_gradients(
+                batch_observations, batch_actions, batch_old_probs, batch_weights,
+                w1, b1, w2, b2, clip_epsilon,
+            )
 
-        w1, b1, w2, b2 = update_policy(w1, b1, w2, b2, grad_w1, grad_b1, grad_w2, grad_b2, learning_rate)
+            w1, b1, w2, b2 = update_policy(
+                w1, b1, w2, b2, grad_w1, grad_b1, grad_w2, grad_b2, learning_rate,
+            )
 
-        # the critic is fitted to the un-normalized returns, which on CartPole
-        # run up to about 100 with gamma = 0.99. that scale is why the value
-        # learning rate is so much smaller than the policy one.
-        grad_vw1, grad_vb1, grad_vw2, grad_vb2 = compute_value_gradients(
-            batch_observations, batch_returns, vw1, vb1, vw2, vb2,
-        )
+            grad_vw1, grad_vb1, grad_vw2, grad_vb2 = compute_value_gradients(
+                batch_observations, batch_returns, vw1, vb1, vw2, vb2,
+            )
 
-        vw1, vb1, vw2, vb2 = update_value_fn(
-            vw1, vb1, vw2, vb2, grad_vw1, grad_vb1, grad_vw2, grad_vb2, value_learning_rate,
-        )
+            vw1, vb1, vw2, vb2 = update_value_fn(
+                vw1, vb1, vw2, vb2, grad_vw1, grad_vb1, grad_vw2, grad_vb2, value_learning_rate,
+            )
 
         recent_average = np.mean(episode_rewards_history[-50:])
 
@@ -386,7 +390,7 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
     eval_env.close()
 
     return {
-        "algorithm": "a2c",
+        "algorithm": "ppo",
         "normalization": normalization,
         "seed": seed,
         "episode_returns": episode_rewards_history,
@@ -396,6 +400,58 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
         "eval_best_mean": best_mean,
         "eval_best_std": best_std,
     }
+
+def compute_ppo_policy_gradients(batch_observations, batch_actions, batch_old_probs,
+                                 weights, w1, b1, w2, b2, clip_epsilon):
+    grad_w1 = np.zeros_like(w1)
+    grad_b1 = np.zeros_like(b1)
+    grad_w2 = np.zeros_like(w2)
+    grad_b2 = np.zeros_like(b2)
+
+    for obs, action, old_prob, advantage in zip(batch_observations, batch_actions, batch_old_probs, weights):
+        # the forward pass has to be redone every epoch. the cached activations
+        # from collection time are stale the moment the first update lands -
+        # this is the one algorithm here that cannot reuse them.
+        probs, hidden = policy_forward(obs, w1, b1, w2, b2)
+
+        ratio = probs[action] / old_prob
+
+        unclipped = ratio * advantage
+        clipped = np.clip(ratio, 1 - clip_epsilon, 1 + clip_epsilon) * advantage
+
+        # min() picks whichever term is smaller. when that is the clipped one,
+        # the objective no longer depends on the ratio, so the gradient is zero
+        # and this timestep stops contributing. that only happens when the
+        # policy has drifted too far IN THE DIRECTION the advantage wants.
+        if unclipped <= clipped:
+            d_objective_d_ratio = advantage
+        else:
+            d_objective_d_ratio = 0.0
+
+        # chain rule. d(ratio)/d(logits) = ratio * d(log p_a)/d(logits), and
+        # d(log p_a)/d(logits) is the negative of the softmax shortcut below,
+        # so the two negatives cancel and no leading minus sign is needed.
+        dlogits = probs.copy()
+        dlogits[action] -= 1
+        dlogits *= d_objective_d_ratio * ratio
+
+        grad_w2 += np.outer(hidden, dlogits)
+        grad_b2 += dlogits
+
+        dhidden = w2 @ dlogits
+        dhidden_pre = dhidden * (1 - hidden ** 2)
+
+        grad_w1 += np.outer(obs, dhidden_pre)
+        grad_b1 += dhidden_pre
+
+    num_steps = len(batch_observations)
+
+    grad_w1 /= num_steps
+    grad_b1 /= num_steps
+    grad_w2 /= num_steps
+    grad_b2 /= num_steps
+
+    return grad_w1, grad_b1, grad_w2, grad_b2
 
 
 def main():
