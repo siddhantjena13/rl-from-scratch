@@ -1,19 +1,12 @@
 """
-REINFORCE with a learned value baseline, on CartPole-v1, from scratch in NumPy.
+REINFORCE with a learned value baseline on CartPole-v1, from scratch in NumPy.
 
-This is reinforce.py with one change: a second network learns to predict the
-discounted return from a state, and the policy is weighted by the advantage
+Same as reinforce.py, except a second network predicts V(s) and the policy is
+weighted by A_t = G_t - V(s_t) instead of by G_t. Subtracting a baseline that
+does not depend on the action keeps the gradient unbiased but lowers variance.
 
-    A_t = G_t - V(s_t)
-
-instead of by G_t directly. G_t is still the full Monte Carlo return, so the
-estimate stays unbiased - the critic only recentres it. Subtracting a baseline
-that does not depend on the action leaves the expected gradient unchanged and
-lowers its variance, which is the whole trick.
-
-Note that this is NOT A2C. A2C replaces the future with the critic's estimate
-of the future (a bootstrap), giving A_t = r_t + gamma*V(s_t+1) - V(s_t). Here
-the critic never enters the target. That is a2c.py.
+This is not A2C: G_t is still the full Monte Carlo return, so the critic never
+enters the target. That is a2c.py.
 """
 
 import gymnasium as gym
@@ -27,10 +20,7 @@ def softmax(logits):
 
 
 def make_env(seed):
-    # three separate sources of randomness have to be pinned or a run does not
-    # reproduce: the environment's reset RNG, the action space sampler, and our
-    # own sampling RNG (created by the caller). Seeding only the last of these
-    # is the easy mistake - it looks seeded and is not.
+    # seed the env and the action sampler so runs are repeatable
     env = gym.make("CartPole-v1")
     env.reset(seed=seed)
     env.action_space.seed(seed)
@@ -96,11 +86,10 @@ def compute_advantages(episode_observations, returns, vw1, vb1, vw2, vb2):
     advantages = []
 
     for obs, actual_return in zip(episode_observations, returns):
-        # what did the critic think this state was worth, before it saw how the
-        # episode turned out?
+        # what the critic thought this state was worth
         predicted_value, _ = value_forward(obs, vw1, vb1, vw2, vb2)
 
-        # how much better or worse the real outcome was than expected
+        # how much better or worse the real return was
         advantages.append(actual_return - predicted_value)
 
     return np.array(advantages)
@@ -115,8 +104,7 @@ def compute_value_gradients(batch_observations, batch_returns, vw1, vb1, vw2, vb
     for obs, actual_return in zip(batch_observations, batch_returns):
         predicted_value, hidden = value_forward(obs, vw1, vb1, vw2, vb2)
 
-        # gradient of the squared error (1/2)(V(s) - G)^2 with respect to the
-        # network output. no factor of 2 because of the 1/2 out front.
+        # derivative of (1/2)(V(s) - G)^2 with respect to V(s)
         d_value = predicted_value - actual_return
 
         grad_vw2 += np.outer(hidden, d_value)
@@ -128,7 +116,7 @@ def compute_value_gradients(batch_observations, batch_returns, vw1, vb1, vw2, vb
         grad_vw1 += np.outer(obs, d_hidden_pre)
         grad_vb1 += d_hidden_pre
 
-    # same reasoning as the policy gradient: divide by timesteps, not episodes
+    # average over timesteps
     num_steps = len(batch_observations)
 
     grad_vw1 /= num_steps
@@ -155,10 +143,8 @@ def compute_policy_gradients(batch_observations, batch_actions, batch_hidden, ba
     grad_b2 = np.zeros_like(b2)
 
     for obs, action, hidden, probs, weight in zip(batch_observations, batch_actions, batch_hidden, batch_probs, weights):
-        # for a softmax head the score function collapses to one line:
-        # d(-log p_a) / d logit_j = p_j - [j == a]
-        # so this is the gradient of the negative log likelihood, and since the
-        # update below subtracts it, descending here climbs the objective.
+        # gradient of -log(prob of the action we took). for a softmax this is
+        # just the probs with a 1 subtracted at the chosen action.
         dlogits = probs.copy()
         dlogits[action] -= 1
         dlogits *= weight
@@ -172,11 +158,7 @@ def compute_policy_gradients(batch_observations, batch_actions, batch_hidden, ba
         grad_w1 += np.outer(obs, dhidden_pre)
         grad_b1 += dhidden_pre
 
-    # divide by the number of TIMESTEPS, not the number of episodes. the loop
-    # above runs once per timestep, so dividing by the episode count leaves the
-    # gradient proportional to the average episode length - which quietly
-    # multiplies the learning rate as the policy gets better and episodes get
-    # longer. that is exactly when you least want the step size to grow.
+    # average over timesteps, not episodes
     num_steps = len(batch_observations)
 
     grad_w1 /= num_steps
@@ -205,9 +187,7 @@ def run_episode(env, w1, b1, w2, b2, rng):
     episode_actions = []
     episode_rewards = []
 
-    # the activations computed here to pick an action are exactly the ones the
-    # gradient wants afterwards, and the weights do not move until the batch is
-    # finished, so there is no reason to run the forward pass a second time.
+    # save these now so the gradient step does not need another forward pass
     episode_hidden = []
     episode_probs = []
 
@@ -233,9 +213,7 @@ def evaluate_policy(env, w1, b1, w2, b2, num_episodes, seed):
     rewards = []
 
     for i in range(num_episodes):
-        # seed every evaluation episode so the number in the results table is
-        # reproducible. the policy is greedy here, so the starting state is the
-        # only randomness left.
+        # fixed seeds so evaluation gives the same numbers every time
         obs, info = env.reset(seed=seed + i)
         done = False
         total_reward = 0
@@ -255,8 +233,7 @@ def evaluate_policy(env, w1, b1, w2, b2, num_episodes, seed):
 
 
 def episodes_to_solve(episode_rewards_history, threshold=475.0, window=50):
-    # count in episodes rather than batches so the number stays comparable
-    # across algorithms even if the batch size changes.
+    # first episode where the average of the last 50 hits the threshold
     if len(episode_rewards_history) < window:
         return None
 
@@ -296,25 +273,12 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
 
             returns = compute_discounted_returns(episode_rewards, gamma)
 
-            # the only line that differs from reinforce.py: the weight on
-            # grad-log-pi is the advantage rather than the raw return. note the
-            # critic is evaluated here, BEFORE it is updated below, so the
-            # baseline is the one that was in force when the data was collected.
+            # weight each step by the advantage instead of the raw return. the
+            # critic is used here before it gets updated further down.
             advantages = compute_advantages(episode_observations, returns, vw1, vb1, vw2, vb2)
 
-            # "episode": normalize inside each episode. a 500-step episode and a
-            # 20-step episode both come out mean 0 std 1, so the update can no
-            # longer tell that one of them was much better than the other - only
-            # which timesteps within an episode were relatively good.
-            # "batch": one normalization across every timestep collected, which
-            # keeps that between-episode signal.
-            #
-            # worth noticing: normalizing already subtracts a mean, which is most
-            # of what a constant baseline buys you. so the critic only earns its
-            # keep here to the extent that it is genuinely state-DEPENDENT - that
-            # it knows an upright pole is worth more than one already tipping.
-            # if the curves do not separate from reinforce.py, that is the
-            # reason, and it is worth reporting rather than hiding.
+            # "episode": normalize inside each episode
+            # "batch": normalize once across the whole batch
             if normalization == "episode":
                 advantages = normalize(advantages)
 
@@ -341,9 +305,8 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
 
         w1, b1, w2, b2 = update_policy(w1, b1, w2, b2, grad_w1, grad_b1, grad_w2, grad_b2, learning_rate)
 
-        # the critic is fitted to the un-normalized returns, which on CartPole
-        # run up to about 100 with gamma = 0.99. that scale is why the value
-        # learning rate is so much smaller than the policy one.
+        # the critic fits the raw returns, which are a lot bigger than the
+        # normalized advantages, so it gets its own learning rate
         grad_vw1, grad_vb1, grad_vw2, grad_vb2 = compute_value_gradients(
             batch_observations, batch_returns, vw1, vb1, vw2, vb2,
         )
@@ -365,9 +328,7 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
                 f"recent average reward = {recent_average:.2f}"
             )
 
-    # report both. the best checkpoint on its own flatters a noisy run, and the
-    # final policy on its own hides a run that found a good policy and then
-    # walked away from it.
+    # evaluate the final policy and the best one we saved
     final_mean, final_std = evaluate_policy(eval_env, w1, b1, w2, b2, eval_episodes, seed + 10000)
 
     best_w1, best_b1, best_w2, best_b2 = best_params
