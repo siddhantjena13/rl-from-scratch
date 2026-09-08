@@ -195,6 +195,7 @@ def run_episode(env, w1, b1, w2, b2, rng):
     done = False
     total_reward = 0
 
+    episode_old_probs = []
     episode_observations = []
     episode_actions = []
     episode_rewards = []
@@ -218,6 +219,7 @@ def run_episode(env, w1, b1, w2, b2, rng):
         episode_actions.append(action)
         episode_hidden.append(hidden)
         episode_probs.append(probs)
+        episode_old_probs.append(probs[action])
 
         next_obs, reward, terminated, truncated, info = env.step(action)
 
@@ -229,8 +231,9 @@ def run_episode(env, w1, b1, w2, b2, rng):
         done = terminated or truncated
         obs = next_obs
 
-    return (episode_observations, episode_actions, episode_rewards, episode_hidden,
-            episode_probs, episode_next_observations, episode_terminated, total_reward)
+        return (episode_observations, episode_actions, episode_rewards, episode_hidden,
+            episode_probs, episode_next_observations, episode_terminated,
+            episode_old_probs, total_reward)
 
 
 def evaluate_policy(env, w1, b1, w2, b2, num_episodes, seed):
@@ -292,11 +295,11 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
         batch_weights = []
         batch_returns = []
         batch_rewards = []
+        batch_old_probs = []
 
         for episode in range(batch_size):
-            episode_observations, episode_actions, episode_rewards, episode_hidden, episode_probs, episode_next_observations, episode_terminated, total_reward = run_episode(
-                env, w1, b1, w2, b2, rng,
-            )
+            episode_observations, episode_actions, episode_rewards, episode_hidden, episode_probs, episode_next_observations, episode_terminated, episode_old_probs, total_reward = run_episode(
+                env, w1, b1, w2, b2, rng,)
 
             # the only line that differs from reinforce.py: the weight on
             # grad-log-pi is the advantage rather than the raw return. note the
@@ -328,12 +331,14 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
             batch_probs.extend(episode_probs)
             batch_weights.extend(advantages)
             batch_returns.extend(value_targets)
+            batch_old_probs.extend(episode_old_probs)
 
             batch_rewards.append(total_reward)
             episode_rewards_history.append(total_reward)
 
         batch_weights = np.array(batch_weights)
         batch_returns = np.array(batch_returns)
+        batch_old_probs = np.array(batch_old_probs)
 
         if normalization == "batch":
             batch_weights = normalize(batch_weights)
