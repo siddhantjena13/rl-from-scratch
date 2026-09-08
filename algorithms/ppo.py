@@ -77,7 +77,7 @@ def value_forward(obs, vw1, vb1, vw2, vb2):
 def compute_td_errors(episode_observations, episode_rewards, episode_next_observations,
                       episode_terminated, gamma, vw1, vb1, vw2, vb2):
     td_errors = []
-    td_targets = []
+    values = []
 
     for obs, reward, next_obs, terminated in zip(
         episode_observations, episode_rewards, episode_next_observations, episode_terminated
@@ -89,15 +89,10 @@ def compute_td_errors(episode_observations, episode_rewards, episode_next_observ
         else:
             next_value, _ = value_forward(next_obs, vw1, vb1, vw2, vb2)
 
-        # what this state turned out to be worth, using one real reward and the
-        # critic's guess for everything after. this is both the critic's
-        # regression target and, minus the old guess, the policy's advantage.
-        target = reward + gamma * next_value
+        values.append(value)
+        td_errors.append(reward + gamma * next_value - value)
 
-        td_targets.append(target)
-        td_errors.append(target - value)
-
-    return np.array(td_errors), np.array(td_targets)
+    return np.array(td_errors), np.array(values)
 
 
 def compute_value_gradients(batch_observations, batch_returns, vw1, vb1, vw2, vb2):
@@ -276,6 +271,7 @@ def episodes_to_solve(episode_rewards_history, threshold=475.0, window=50):
 
 def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0.99,
           learning_rate=0.5, value_learning_rate=0.1, clip_epsilon=0.2, ppo_epochs=4,
+          advantage_estimator="td", gae_lambda=0.95,
           hidden_dim=16, eval_episodes=20, verbose=True):
     env = make_env(seed)
     eval_env = make_env(seed + 10000)
@@ -306,10 +302,20 @@ def train(seed=0, normalization="batch", num_batches=200, batch_size=10, gamma=0
             # grad-log-pi is the advantage rather than the raw return. note the
             # critic is evaluated here, BEFORE it is updated below, so the
             # baseline is the one that was in force when the data was collected.
-            advantages, value_targets = compute_td_errors(
-                    episode_observations, episode_rewards, episode_next_observations,
-                    episode_terminated, gamma, vw1, vb1, vw2, vb2,
-                )
+            td_errors, values = compute_td_errors(
+                episode_observations, episode_rewards, episode_next_observations,
+                episode_terminated, gamma, vw1, vb1, vw2, vb2,
+            )
+
+            if advantage_estimator == "gae":
+                advantages = compute_gae(td_errors, gamma, gae_lambda)
+            else:
+                advantages = td_errors
+
+            # A_t = G_t^lambda - V(s_t) by construction, so adding the value
+            # back recovers the lambda-return. that is the target the critic
+            # should chase - matching the horizon the policy is being scored on.
+            value_targets = advantages + values   
             # "episode": normalize inside each episode. a 500-step episode and a
             # 20-step episode both come out mean 0 std 1, so the update can no
             # longer tell that one of them was much better than the other - only
@@ -452,6 +458,17 @@ def compute_ppo_policy_gradients(batch_observations, batch_actions, batch_old_pr
     grad_b2 /= num_steps
 
     return grad_w1, grad_b1, grad_w2, grad_b2
+
+def compute_gae(td_errors, gamma, lam):
+    advantages = []
+    running_advantage = 0.0
+
+    for delta in reversed(td_errors):
+        running_advantage = delta + gamma * lam * running_advantage
+        advantages.append(running_advantage)
+
+    advantages.reverse()
+    return np.array(advantages)
 
 
 def main():
