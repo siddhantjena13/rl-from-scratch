@@ -1,0 +1,19 @@
+label,algorithm,normalization,advantage,seed,episodes_to_solve,episodes_trained,eval_final_mean,eval_final_std,eval_best_mean,eval_best_std,wall_seconds
+REINFORCE (batch norm),reinforce,batch,mc,0,1540,2000,500.0,0.0,500.0,0.0,12.1
+REINFORCE (batch norm),reinforce,batch,mc,1,1386,2000,340.1,55.14,495.35,20.27,12.5
+REINFORCE (batch norm),reinforce,batch,mc,2,1788,2000,500.0,0.0,500.0,0.0,12.2
+REINFORCE (episode norm),reinforce,episode,mc,0,1884,2000,500.0,0.0,500.0,0.0,11.7
+REINFORCE (episode norm),reinforce,episode,mc,1,,2000,500.0,0.0,500.0,0.0,10.9
+REINFORCE (episode norm),reinforce,episode,mc,2,1860,2000,219.65,21.52,500.0,0.0,11.4
+REINFORCE + baseline,reinforce_baseline,batch,mc,0,1220,2000,500.0,0.0,500.0,0.0,19.7
+REINFORCE + baseline,reinforce_baseline,batch,mc,1,1284,2000,500.0,0.0,443.7,61.17,19.6
+REINFORCE + baseline,reinforce_baseline,batch,mc,2,1269,2000,500.0,0.0,500.0,0.0,19.9
+A2C,a2c,batch,mc,0,1639,2000,9.4,0.66,391.95,10.47,11.5
+A2C,a2c,batch,mc,1,1820,2000,388.5,58.57,280.3,28.41,9.5
+A2C,a2c,batch,mc,2,,2000,273.85,57.71,500.0,0.0,9.6
+PPO (TD advantage),ppo,batch,td,0,,2000,83.55,17.37,132.65,26.45,10.6
+PPO (TD advantage),ppo,batch,td,1,,2000,54.0,16.01,201.2,27.03,6.9
+PPO (TD advantage),ppo,batch,td,2,,2000,24.3,3.23,159.8,37.79,6.8
+"PPO (GAE, lambda=0.95)",ppo,batch,gae,0,1353,2000,500.0,0.0,500.0,0.0,57.7
+"PPO (GAE, lambda=0.95)",ppo,batch,gae,1,1149,2000,500.0,0.0,500.0,0.0,70.7
+"PPO (GAE, lambda=0.95)",ppo,batch,gae,2,1457,2000,500.0,0.0,500.0,0.0,66.9
